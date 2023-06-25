@@ -1,0 +1,238 @@
+# teste de ping nos hosts -k pedindo solicitação de senha do usuario vagrant
+ansible -i hosts all -u vagrant -k -m ping
+
+# fazendo um update com usuario root
+ansible -i hosts all -u root -k -m apt -a "name=* state=latest"
+
+# criar chave ssh para adicionar no host para autenticaçao sem a necessidade de passar usuario e senha
+ssh-keygen -t rsa -b 2048
+
+#Enviar chave privada para o host
+ssh-copy-id -i .ssh/id_rsa vagrant@192.168.0.50
+
+#teste lista inventario de ping
+ansible -i servidores all -k -m ping (-k solicita senha)
+ansible -i servidores all -m ping
+
+#exucanto o comando apenas nos servidores filial do grupo criado no inventario
+ansible -i servidores filial_01 -m ping
+
+#executando o o comando em apenas 1 grupo definido no arquivo de inventario
+ansible -i servidores web_f01 -m ping
+
+#Executando com variaveris e nivel de host
+ansible -i servidores ubuntu1 -m ping
+
+#Depois de criar variaveis de grupo basta chamar o aliases do arquivos iventario
+ansible -i servidores filial_01 -m ping
+ansible -i servidores fileserver -m ping
+
+# roles
+
+# criar a estrutura
+├── roles
+│   └── checklist
+│       ├── defaults
+│       ├── files
+│       ├── handlers
+│       ├── meta
+│       ├── tasks
+│       │   └── main.yml
+│       ├── template
+│       └── vars
+
+# criar o arquivo main.yml
+
+vagrant@ansible:~$ cat roles/checklist/tasks/main.yml
+---
+- name: Instalando pacotes essencias
+  apt:
+   name:
+    - vim
+    - net-tools
+    - telnet
+    - nmap
+   state: present
+
+# criar o arquivo playbook
+vagrant@ansible:~$ cat main.yml
+---
+- hosts: all
+  become: true
+  roles:
+     - checklist
+
+# executar o playbook
+ansible-playbook -i servidores main.yml
+
+# executando em apenas um grupo de host ou host especifico
+
+ansible-playbook -i servidores main.yml --limit fileserver
+
+# utilizando variaveis para instalação.
+# criando o arquino na pasta vars
+
+vagrant@ansible:~$ cat /home/vagrant/roles/checklist/vars/main.yml
+pacotes:
+    - net-tools
+    - vim
+    - telnet
+    - nmap
+
+# alteranro o arquivo da pasta task para receber a variavel
+vagrant@ansible:~$ cat /home/vagrant/roles/checklist/tasks/main.yml
+---
+- name: Instalando pacotes essencias
+  apt:
+   name: "{{ pacotes }}"
+  state: present
+
+# Feito a mudança executar o plabook e um servidor ou gruoo espeficico
+ansible-playbook -i servidores main.yml --limit ubuntu1
+
+# Verificar a configuração do servidor
+ansible -i servidores ubuntu1 -m setup
+
+# Usando variavel de condicional when
+vagrant@ansible:~$ cat /home/vagrant/roles/checklist/tasks/main.yml
+---
+- name: Instalando pacotes essencias
+  apt:
+   name: "{{ pacotes }}"
+   state: present
+  when: ansible_distribution=="Debian"
+
+- name: Instalando pacotes essencias
+  yum:
+   name: "{{ pacotes }}"
+   state: present
+  when: ansible_distribution=="CentOS"
+
+# Depois so executar o comando para disparar o playbook
+ansible-playbook -i servidores main.yml
+
+# Criando um nova role de exemplo do nginx
+├── roles
+│   └── nginx
+│       ├── defaults
+│       ├── files
+│       ├── handlers
+│       ├── meta
+│       ├── tasks
+│       │   └── main.yml
+│       ├── template
+│       └── vars
+
+# Dentro da pasta files criar o arquivo de configuração defaults.conf
+o conteudo peguei de um servido nginx pronto
+
+# Critar um index.html dentro da pasta templates
+vagrant@ansible:~/roles$ cat nginx/templates/index.html
+Hostname do Servidor = {{ ansible_hostname }}
+Distribuição do SO = {{ ansible_distribution }}
+IP do Servidor = {{ ansible_all_ipv4_addresses }}
+
+
+versao = {{ versao }}
+
+# criar na pasta vars o arquivo main.yml
+vagrant@ansible:~/roles$ cat nginx/vars/main.yml
+versao: "1.0"
+
+
+#cria na pasta tasks o main.yml
+
+vagrant@ansible:~$ cat /home/vagrant/roles/nginx/tasks/main.yml
+---
+- name: instalandno nginx
+  apt: name=nginx state=latest
+
+#  - name: Copiando arquivo de configuração
+#  copy:
+#    src: defaults.conf
+#    dest: /etc/nginx/conf.d/
+
+- name: Copiando index.html
+  template:
+    src: index.html
+    dest: /var/www/html
+    #    dest: /usr/share/nginx/html
+
+- name: Iniciando Serviço
+  service: name=nginx state=restarted
+...
+
+# Adicionar o playbook a nova role ngin
+vagrant@ansible:~$ cat main.yml
+---
+- hosts: all
+  become: true
+  roles:
+     - checklist
+     - nginx
+
+ # Para testar a config acima
+ ansible-playbook -i servidores main.yml --limit ubuntu1
+
+ #Roles - handlers Primeiro de tudo é remover o servider e deixar da forma abaixo:
+ vagrant@ansible:~/roles/nginx/tasks$ cat main.yml
+---
+
+- name: instalandno nginx
+  apt: name=nginx state=latest
+
+#  - name: Copiando arquivo de configuração
+#  copy:
+#    src: defaults.conf
+#    dest: /etc/nginx/conf.d/
+
+- name: Copiando index.html
+  template:
+    src: index.html
+    dest: /var/www/html
+
+...
+# Criarm dentro da pasta handlers o main.yml
+vagrant@ansible:~/roles/nginx/handlers$ cat main.yml
+- name: Iniciando Serviço
+  service: name=nginx state=restarted
+
+# ajusatando o arquivo de task adicionaro o notify
+
+vagrant@ansible:~/roles/nginx/tasks$ cat main.yml
+---
+
+- name: instalandno nginx
+  apt: name=nginx state=latest
+  notify: reinciando nginx
+
+#  - name: Copiando arquivo de configuração
+#  copy:
+#    src: defaults.conf
+#    dest: /etc/nginx/conf.d/
+
+- name: Copiando index.html
+  template:
+    src: index.html
+    dest: /var/www/html
+  notify: reinciando nginx
+
+# Testando a configuração acima
+ ansible-playbook -i servidores main.yml --limit ubuntu1
+
+# criptotrafar arquivo
+ansible-vault create senha.yml
+
+# para editar
+ ansible-vault edit senha.yml
+ ansible-vault view senha.yml
+
+# criptografar arquivo existente
+ansible-vault encrypt senha.yml
+
+# se tiver arquivo criptografado 
+ansible-playbook -i servidores main.yml --ask-vault-pass
+
+# para fazer apenas um check
+
+ansible-playbook -i servidores main.yml --limit ubuntu1 --check
